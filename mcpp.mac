@@ -7,7 +7,7 @@
     printf(FOO);
 
 （処理後）
-    printf( "hello" );
+    printf("hello");
 
 
 プリプロセスの結果は新しい秀丸に書き出します。
@@ -31,7 +31,10 @@
 /////////////////////////////////////////////////////////////////////////////
 
 //一時ディレクトリ
-$_g_tmp_dir = hidemarudir + "/mcpp/macro_temp/";
+//$_g_tmp_dir = hidemarudir + "/mcpp/macro_temp/";
+//テンポラリファイル名（ベース名）
+//環境変数TMPのディレクトリに生成する。（可能な限り削除される）
+$g_tmpfile_base_name 	= "tmp_hidemaru_mcpp_macro";
 
 //mcpp.exe へのパス
 $_g_exe_mcpp= "\"" + hidemarudir + "/mcpp/bin/mcpp.exe" + "\"";
@@ -52,6 +55,8 @@ $_g_opt_ex	= "";
 /////////////////////////////////////////////////////////////////////////////
 //	メイン処理
 /////////////////////////////////////////////////////////////////////////////
+$_g_abs_tmp_filename = "";
+
 
 menu "プリプロセス", "依存関係を出力";
 if(0==result){
@@ -69,23 +74,21 @@ Main:
 	##old_x=x;
 	##old_y=y;
 
-	//$$dllname = "HmPipe.hmf";
-	//loaddll $$dllname;
-
 	call Start;
-
-	//freedll $$dllname;
-
+	
+	//一時ファイルを削除する
+	call RemoveTmpFile;
+	
 	moveto ##old_x, ##old_y;
 	return ##return ;
 
 Start:
 	$$opt				= $_g_opt_base + $_g_opt_ex;
-	$$tmp_in_filename	= $_g_tmp_dir + "tmp_mcpp_in.txt";
 	##use_tmp_file		= true;
-
+	$$tmp_in_filename	= "";
+	
 	if(selecting || rectselecting){
-		//一時ファイルを使うを使う
+		//一時ファイルを使用
 	}else{
 		if(0 == strlen(filename)){
 			//無題
@@ -97,9 +100,13 @@ Start:
 		}
 	}
 
-	//$$tmp_out_filename = $_g_tmp_dir + "tmp_mcpp_out.txt";
-
 	if(##use_tmp_file){
+		call GetTempFile ".txt";
+		$$tmp_in_filename	= $$return;
+		$_g_abs_tmp_filename= $$tmp_in_filename;
+		if(! strlen($$tmp_in_filename)){
+			return false;
+		}
 		call MakeFile  $$tmp_in_filename;
 		if(false == ##return){
 			return false;
@@ -109,11 +116,6 @@ Start:
 	call SpawnMcpp $$opt, $$tmp_in_filename;		//, $$tmp_out_filename;
 	if(false == ##return){
 		return false;
-	}
-
-	if(##use_tmp_file){
-		//一時ファイルを削除する
-		//あとで・・・ 田楽DLLを使うのか？
 	}
 
 	return true;
@@ -162,3 +164,29 @@ SpawnMcpp:
 	enabledraw;
 
 	return true;
+
+//テンポラリファイル作成サブルーチン
+GetTempFile:
+	$$ext = $$1;
+	$$tempdir = getenv("tmp");
+	if( leftstr( $$tempdir, 1 ) != "\\" ) {
+		$$tempdir = $$tempdir + "\\";
+	}
+	##n		= tickcount;
+	##end 	= ##n + 1000;
+	while(##n < ##end){
+	 	$$tempfile = $$tempdir + $g_tmpfile_base_name + str(##n) + $$ext;
+	 	if( !existfile( $$tempfile ) ) {
+			return $$tempfile;
+		}
+	 	##n = ##n + 1;
+	}
+	message "テンポラリファイルが作成できません\n" + $$tempfile;
+	return "";
+
+RemoveTmpFile:
+	$$fn = $_g_abs_tmp_filename;
+	if(strlen($$fn)){
+		deletefile $$fn;
+	}
+	return ;
