@@ -1,0 +1,164 @@
+/*  MCPPを使ってプリプロセスを行う秀丸マクロ。
+
+秀丸エディタ上でプリプロセスを行います。
+
+（処理前）
+    #define FOO "hello"
+    printf(FOO);
+
+（処理後）
+    printf( "hello" );
+
+
+プリプロセスの結果は新しい秀丸に書き出します。
+
+
+【動作】
+・選択範囲があればその範囲をプリプロセスします。
+    →  一時ファイルを使ってプリプロセスするので #include がうまく処理できません。
+
+・選択範囲が無ければファイル全体をプリプロセスします。
+    →  「ファイルが保存されていない 、又は、更新されている」と、一時ファイルを使って
+        プリプロセスするので #include がうまく処理できません。
+    → 「ファイルが保存済み、かつ、未更新」なら、ファイルをそのまま使うので、
+        #include もうまく処理できる。
+*/
+
+
+
+/////////////////////////////////////////////////////////////////////////////
+//	ユーザーカスタマイズ
+/////////////////////////////////////////////////////////////////////////////
+
+//一時ディレクトリ
+$_g_tmp_dir = hidemarudir + "/mcpp/macro_temp/";
+
+//mcpp.exe へのパス
+$_g_exe_mcpp= "\"" + hidemarudir + "/mcpp/bin/mcpp.exe" + "\"";
+
+//mcpp.exe のオプション
+$_g_opt_base= "-eshift-JIS -DWIN32 ";
+$_g_opt_inc = "-I../include -I../inc ";
+$_g_opt_ex	= "";
+
+
+
+
+
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////
+//	メイン処理
+/////////////////////////////////////////////////////////////////////////////
+
+menu "プリプロセス", "依存関係を出力";
+if(0==result){
+	endmacro;
+}else if(1==result){
+	//pass
+}else if(2==result){
+	$_g_opt_ex = "-M ";
+}
+
+call Main;
+endmacro;
+
+Main:
+	##old_x=x;
+	##old_y=y;
+
+	//$$dllname = "HmPipe.hmf";
+	//loaddll $$dllname;
+
+	call Start;
+
+	//freedll $$dllname;
+
+	moveto ##old_x, ##old_y;
+	return ##return ;
+
+Start:
+	$$opt				= $_g_opt_base + $_g_opt_ex;
+	$$tmp_in_filename	= $_g_tmp_dir + "tmp_mcpp_in.txt";
+	##use_tmp_file		= true;
+
+	if(selecting || rectselecting){
+		//一時ファイルを使うを使う
+	}else{
+		if(0 == strlen(filename)){
+			//無題
+		}else{
+			$$tmp_in_filename	= filename;
+			##use_tmp_file		= false;
+
+			$$opt = $$opt + $_g_opt_inc;
+		}
+	}
+
+	//$$tmp_out_filename = $_g_tmp_dir + "tmp_mcpp_out.txt";
+
+	if(##use_tmp_file){
+		call MakeFile  $$tmp_in_filename;
+		if(false == ##return){
+			return false;
+		}
+	}
+
+	call SpawnMcpp $$opt, $$tmp_in_filename;		//, $$tmp_out_filename;
+	if(false == ##return){
+		return false;
+	}
+
+	if(##use_tmp_file){
+		//一時ファイルを削除する
+		//あとで・・・ 田楽DLLを使うのか？
+	}
+
+	return true;
+
+MakeFile:
+	$$tmp_filename = $$1;
+
+	if(selecting || rectselecting){
+		//pass
+	}else{
+		selectall;
+	}
+
+	//選択範囲をクリップボードへコピー
+	copy2;
+
+	//新しい秀丸へ貼り付け
+	##cur_hidemaru = hidemaruhandle(0);
+	newfile;
+	##dst_hidemaru = hidemaruhandle(0);
+	poppaste;
+
+	//新しい秀丸をファイルへ保存
+	saveas $$tmp_filename;
+
+	//元の秀丸に戻す。
+	setactivehidemaru ##cur_hidemaru;
+	//この秀丸はいらないので閉じる。
+	closehidemaru ##dst_hidemaru;
+
+	return true;
+
+SpawnMcpp:
+	$$opt = $$1;
+	$$tmp_in_filename	= "\"" + $$2 + "\"";
+	//$$tmp_out_filename	= "\"" + $$2 + "\"";
+
+	//新しい秀丸へ貼り付け
+	##cur_hidemaru = hidemaruhandle(0);
+	newfile;
+	##dst_hidemaru = hidemaruhandle(0);
+
+	disabledraw;
+	run $_g_exe_mcpp + " " + $$opt + " " + $$tmp_in_filename + " >con";
+	//run $_g_exe_mcpp + " " + $$tmp_in_filename + " " + $$tmp_out_filename;
+	enabledraw;
+
+	return true;
