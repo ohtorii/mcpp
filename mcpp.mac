@@ -1,192 +1,275 @@
-/*  MCPPを使ってプリプロセスを行う秀丸マクロ。
+/*	C/C++のプリプロセスを行う秀丸マクロ。
 
-秀丸エディタ上でプリプロセスを行います。
+プリプロセスの結果は「アウトプット枠」へ書き出します。
 
-（処理前）
-    #define FOO "hello"
-    printf(FOO);
+【対象者】
+	プログラマー
 
-（処理後）
-    printf("hello");
-
-
-プリプロセスの結果は新しい秀丸に書き出します。
-
+【動作環境】
+	秀丸エディタ ver8.20 b14 で動作を確認。
+	秀丸エディタ ver8 以降なら動くはず。
 
 【動作】
-・選択範囲があればその範囲をプリプロセスします。
-    →  一時ファイルを使ってプリプロセスするので #include がうまく処理できません。
+	＊ファイル全体を対象とします、選択の有無は無視されます。
+	＊利便性のため編集のファイルをセーブしなくてもプリプロセス出来るようにしています。
+	  そのため「ファイルへ保存した・していない」「更新あり・なし」でinclude動作が多少異なります。
+	  詳細は後述で。
 
-・選択範囲が無ければファイル全体をプリプロセスします。
-    →  「ファイルが保存されていない 、又は、更新されている」と、一時ファイルを使って
-        プリプロセスするので #include がうまく処理できません。
-    → 「ファイルが保存済み、かつ、未更新」なら、ファイルをそのまま使うので、
-        #include もうまく処理できる。
+【includeの動作】
+	＊ファイルへ保存されている
+		・更新マークが付いていない		（※１）
+		・更新マークが付いている		（※２）
+	＊ファイルへ保存されていない		（※２）
+
+	（※１）
+	#includeは正しく動作する。
+
+	（※２）
+	編集中のファイルをテンポラリファイルへ保存したのちにプリプロセスを行います。
+	そのため#includeが正しく動作しない可能性があります。
+	正しく動作するように手は打ったつもりですが・・・保証はできません。
+	（何をやっているのかは $_g_opt_inc_ex変数 を参照。）
 */
 
 
 
-/////////////////////////////////////////////////////////////////////////////
-//	ユーザーカスタマイズ
-/////////////////////////////////////////////////////////////////////////////
-
-//一時ディレクトリ
-//$_g_tmp_dir = hidemarudir + "/mcpp/macro_temp/";
-//テンポラリファイル名（ベース名）
-//環境変数TMPのディレクトリに生成する。（可能な限り削除される）
-$g_tmpfile_base_name 	= "tmp_hidemaru_mcpp_macro";
+//////////////////////////////////////////////////////////////////////////////
+//			ユーザーカスタマイズ
+//////////////////////////////////////////////////////////////////////////////
 
 //mcpp.exe へのパス
-$_g_exe_mcpp= "\"" + hidemarudir + "/mcpp/bin/mcpp.exe" + "\"";
+$_g_exe	= "\"" + hidemarudir + "/mcpp/bin/mcpp.exe" + "\"";
 
-//mcpp.exe のオプション
-$_g_opt_base= "-eshift-JIS -DWIN32 ";
-$_g_opt_inc = "-I../include -I../inc ";
-$_g_opt_ex	= "";
+//文字コード、事前定義のdefine、警告レベルなど
+$_g_opt_base	= "-DWIN32 -P -W 0 ";
 
+//通常の include ディレクトリ
+$_g_opt_inc 	= "-I../include -I../inc ";
 
-
-
-
-
+//その他、追加オプション
+$_g_opt_ex		= "";
 
 
 
-/////////////////////////////////////////////////////////////////////////////
-//	メイン処理
-/////////////////////////////////////////////////////////////////////////////
-$_g_abs_tmp_filename = "";
+
+//////////////////////////////////////////////////////////////////////////////
+//			内部処理
+//////////////////////////////////////////////////////////////////////////////
+
+//文字コード
+$_g_encoding  	= "";
+
+//プリプロセス対象のファイルをテンポラリへ作る都合上、カレントディレクトリにパスを通しておく。
+$_g_opt_inc_ex	= "-I\"" + directory + "\" ";
+
+//テンポラリディレクトリ名
+$g_tmpdir_base_name = "hidemaru_mcpp_tmp_dir";
+
+//テンポラリファイル名
+//環境変数TMPのディレクトリに生成する。
+$g_tmpfile_base_name = "hidemaru_mcpp_tmp";
 
 
-menu "プリプロセス", "依存関係を出力";
-if(0==result){
-	endmacro;
-}else if(1==result){
-	//pass
-}else if(2==result){
-	$_g_opt_ex = "-M ";
-}
 
-call Main;
+
+call PreMain;
 endmacro;
 
+PreMain:
+	disablehistory 0xff;
+	$_g_old_searchbuffer = searchbuffer;
+	#_g_searchoption 	 = searchoption;
+	setcompatiblemode 0x0003|0x000c|0x0200|0x2000;
+	call Main;
+	setsearch $_g_old_searchbuffer, #_g_searchoption;
+	return ;
+	
 Main:
 	##old_x=x;
 	##old_y=y;
-
+	menu "プリプロセス", "依存関係を出力";
+	if(0==result){
+		return;
+	}else if(1==result){
+		//pass
+	}else if(2==result){
+		$_g_opt_ex = $_g_opt_ex + "-M ";
+	}
+	disabledraw;
+	disableinvert;
 	call Start;
-	
-	//一時ファイルを削除する
-	call RemoveTmpFile;
-	
-	moveto ##old_x, ##old_y;
+	moveto ##old_x,##oldy;
 	return ##return ;
 
-Start:
-	$$opt				= $_g_opt_base + $_g_opt_ex;
-	##use_tmp_file		= true;
-	$$tmp_in_filename	= "";
-	
-	if(selecting || rectselecting){
-		//一時ファイルを使用
-	}else{
-		if(0 == strlen(filename)){
-			//無題
-		}else{
-			$$tmp_in_filename	= filename;
-			##use_tmp_file		= false;
 
-			$$opt = $$opt + $_g_opt_inc;
+Start:
+	call MakeEncodingOpt;
+
+	$$opt				= $_g_opt_base + $_g_opt_ex + $_g_encoding;
+	$$tmp_in_filename	= "";
+	##use_tmp_file		= true;
+	$$current_dir		= "";
+
+	if((0 == strlen(filename) || updated)){
+		//ファイル名が付けられていない or 更新あり
+		call GetTempFile;
+		if(0==strlen($$return)){
+			return false;
 		}
+		$$tmp_in_filename	= $$return;
+		##use_tmp_file		= true;
+		$$current_dir		= directory;
+		$$opt = $$opt + $_g_opt_inc_ex;
+	}else{
+		$$tmp_in_filename	= filename;
+		##use_tmp_file		= false;
+		$$current_dir		= directory;
+
+		$$opt = $$opt + $_g_opt_inc + $_g_opt_cur_inc;
 	}
+
 
 	if(##use_tmp_file){
-		call GetTempFile ".txt";
-		$$tmp_in_filename	= $$return;
-		$_g_abs_tmp_filename= $$tmp_in_filename;
-		if(! strlen($$tmp_in_filename)){
-			return false;
-		}
 		call MakeFile  $$tmp_in_filename;
-		if(false == ##return){
+		if(! ##return){
 			return false;
 		}
 	}
 
-	call SpawnMcpp $$opt, $$tmp_in_filename;		//, $$tmp_out_filename;
+	$$cmd = $_g_exe + " "
+			+ $$opt + " "
+			+ "\"" + $$tmp_in_filename + "\"";
+
+	call SpawnExe $$cmd, $$current_dir;
 	if(false == ##return){
 		return false;
 	}
 
+	if(##use_tmp_file){
+		deletefile $$tmp_in_filename;
+	}
 	return true;
+
 
 MakeFile:
 	$$tmp_filename = $$1;
 
-	if(selecting || rectselecting){
-		//pass
+	selectall;
+	$$text=gettext(seltopx,seltopy,selendx,selendy);
+
+	##prev_hidemaru = hidemaruhandle(0);
+
+	openfile "/h " + $$tmp_filename;
+	if(! result){
+		message("テンポラリファイルのオープンに失敗。\n" + $$tmp_filename);
+		return false;
+	}
+	##new_hidemaru = hidemaruhandle(0);
+	insert $$text;
+	save;
+	setactivehidemaru	##prev_hidemaru;
+	closehidemaruforced ##new_hidemaru;
+	return true;
+
+
+SpawnExe:
+	$$cmd 				= $$1;
+	$$current_dir		= $$2;
+
+	runex $$cmd
+			, 1 			//sync	  0:async 1:sync
+			, 0, "" 		//stdin   0:none 1:auto 2:file 3:(reserve) 4:all 5:select
+			, 7, "" 		//stdout  0:none 1:auto 2:file 3:add file  4:new 5:insert 6:replace
+			, 1, "" 		//stderr  0:none 1:=out 2:file 3:add file  4:new 5:insert 6:replace
+			, 2, $$current_dir //folder  0:none 1:current 2:specify 3:(reserve) 4:exe's folder
+			, 2 			//show	  0:auto 1:show 2:hide
+			, 1 			//nodraw  0:draw 1:no draw
+			, 0 			//unicode 0:ansi 2:unicode
+			;
+	if(! result){
+		message("runex で失敗。!result");
+		return false;
+	}
+	return true;
+
+
+//文字コードの判別
+MakeEncodingOpt:
+	##c = charset&0x3f;
+	$$e = "";
+	if(1==##c){
+		$$e="shift-JIS";
+	}else if(3==##c){
+		$$e="EUC-JP";
+	}else if(4==##c){
+		$$e="shift-JIS";
+	}else if(6==##c){
+		$$e="UTF-8";
+	}else if(9==##c){
+		$$e="GB-2312";
+	}else if(10==##c){
+		$$e="Big-Five";
+	}else if(11==##c){
+		$$e="KSC-5601";	//違うかも?
+	}else if(12==##c){
+		$$e="KSC-5601";	//違うかも?
 	}else{
-		selectall;
+		//mcpp非対応の文字コード。
+		//とりあえずダメ元でプリプロセスさせてみる。
+		$$e="";
 	}
-
-	//選択範囲をクリップボードへコピー
-	copy2;
-
-	//新しい秀丸へ貼り付け
-	##cur_hidemaru = hidemaruhandle(0);
-	newfile;
-	##dst_hidemaru = hidemaruhandle(0);
-	poppaste;
-
-	//新しい秀丸をファイルへ保存
-	saveas $$tmp_filename;
-
-	//元の秀丸に戻す。
-	setactivehidemaru ##cur_hidemaru;
-	//この秀丸はいらないので閉じる。
-	closehidemaru ##dst_hidemaru;
-
-	return true;
-
-SpawnMcpp:
-	$$opt = $$1;
-	$$tmp_in_filename	= "\"" + $$2 + "\"";
-	//$$tmp_out_filename	= "\"" + $$2 + "\"";
-
-	//新しい秀丸へ貼り付け
-	##cur_hidemaru = hidemaruhandle(0);
-	newfile;
-	##dst_hidemaru = hidemaruhandle(0);
-
-	disabledraw;
-	run $_g_exe_mcpp + " " + $$opt + " " + $$tmp_in_filename + " >con";
-	//run $_g_exe_mcpp + " " + $$tmp_in_filename + " " + $$tmp_out_filename;
-	enabledraw;
-
-	return true;
-
-//テンポラリファイル作成サブルーチン
-GetTempFile:
-	$$ext = $$1;
-	$$tempdir = getenv("tmp");
-	if( leftstr( $$tempdir, 1 ) != "\\" ) {
-		$$tempdir = $$tempdir + "\\";
-	}
-	##n		= tickcount;
-	##end 	= ##n + 1000;
-	while(##n < ##end){
-	 	$$tempfile = $$tempdir + $g_tmpfile_base_name + str(##n) + $$ext;
-	 	if( !existfile( $$tempfile ) ) {
-			return $$tempfile;
-		}
-	 	##n = ##n + 1;
-	}
-	message "テンポラリファイルが作成できません\n" + $$tempfile;
-	return "";
-
-RemoveTmpFile:
-	$$fn = $_g_abs_tmp_filename;
-	if(strlen($$fn)){
-		deletefile $$fn;
+	if(0==strlen($$e)){
+		$_g_encoding="";
+	}else{
+		$_g_encoding="-e"+$$e+" ";
 	}
 	return ;
+
+
+//ディレクトリ作成
+CreateDir:
+	$$abs_dirname = $$1;
+	##obj = createobject("Scripting.FileSystemObject");
+	callmethod ##obj,"CreateFolder",$$abs_dirname;
+	##ret=callmethod_returnnum(##obj,"FolderExists",$$abs_dirname);
+	if(! ##ret){
+		message("テンポラリディレクトリの作成に失敗しました。\n" + $$abs_dirname);
+	}
+	releaseobject ##obj;
+	return ##ret;
+
+
+GetTempFile:
+	$$tempdir = getenv("tmp");
+	if(0==strlen($$tempdir)){
+		message("環境変数 tmp が設定されていません、設定して下さい。");
+		return  false;
+	}
+
+	/*if( rightstr( $$tempdir, 1 ) != "\\" ) {
+		$$tempdir = $$tempdir + "\\";
+	}*/
+	$$tempdir = $$tempdir + "\\" + $g_tmpdir_base_name;
+	call CreateDir $$tempdir;
+	if(! ##return){
+		return "";
+	}
+	$$tempdir = $$tempdir + "\\";
+
+	##n=0;
+	while(##n<1000){
+		$$tempfile = $$tempdir + $g_tmpfile_base_name + str(##n);
+		if( !existfile( $$tempfile ) ) {
+			return $$tempfile;
+		}
+		##n = ##n + 1;
+	}
+
+	message "テンポラリファイルが作成できません\n" +
+			$$tempfile + "\n\n" +
+			"下記テンポラリディレクトリ内のファイルを全て削除してみて下さい。\n" +
+			$$tempdir;
+
+	return "";
+
+
